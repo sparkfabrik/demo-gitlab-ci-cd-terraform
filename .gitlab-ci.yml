@@ -1,0 +1,67 @@
+image:
+  name: google/cloud-sdk:alpine
+  entrypoint:
+    - '/usr/bin/env'
+    - 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+
+# Default output file for Terraform plan.
+variables:
+  PLAN: plan.tfplan
+
+before_script:
+  # Installing TF, utilities, setting G credentials.
+  - apk add --no-cache curl unzip
+  - curl -o /tmp/terraform.zip https://releases.hashicorp.com/terraform/0.12.26/terraform_0.12.26_linux_amd64.zip &&
+    unzip /tmp/terraform.zip &&
+    mv terraform /usr/local/bin/terraform &&
+    chmod +x /usr/local/bin/terraform
+  - echo $sa | base64 -d > /tmp/sa.json
+  - export GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json
+  - terraform --version
+  - terraform init
+
+stages:
+  - validate
+  - build
+  - test
+  - deploy
+  - destroy
+
+validate:
+  stage: validate
+  script:
+    - terraform validate
+
+plan:
+  stage: build
+  script:
+    - terraform plan -out=$PLAN
+  artifacts:
+    name: plan
+    paths:
+      - $PLAN
+
+# Separate apply job for manually launching Terraform as it can be destructive
+# action.
+apply:
+  stage: deploy
+  environment:
+    name: production
+  script:
+    - terraform apply -input=false -auto-approve $PLAN
+  dependencies:
+    - plan
+  when: manual
+  only:
+    - master
+
+# Separate destroy job for manually launching Terraform.
+destroy:
+  stage: destroy
+  script:
+    - terraform destroy -auto-approve
+  dependencies:
+    - plan
+  when: manual
+  only:
+    - master
